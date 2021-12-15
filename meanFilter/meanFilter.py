@@ -5,10 +5,14 @@
 # @Author : xxxx
 # @Mail   : xxxx@mail.com
 # @Date   : 2021/12/11
-# @Docs   : 中值滤波及其改进
+# @Docs   : 均值滤波及其改进
 '''
 
 import numpy as np
+import sys
+if '../imPadding/' not in sys.path:
+    sys.path.append('../imPadding')
+from imPadding import padding
 
 def meanFilterBase(im, win_half):
     '''
@@ -23,15 +27,17 @@ def meanFilterBase(im, win_half):
 
     im_h, im_w = im.shape
 
+    im_pad = padding(im, win_half)
+
     filtered = np.zeros((im_h, im_w), im.dtype)
-    for r in range(im_h):
-        blk_top = max(0, r-win_half)
-        blk_bottom = min(im_h, r+win_half+1)
-        for c in range(im_w):
-            blk_left = max(0, c-win_half)
-            blk_right = min(im_w, c+win_half+1)
-            blk = im[blk_top:blk_bottom, blk_left:blk_right]
-            filtered[r, c] = np.mean(blk)
+    for r in range(win_half, im_h+win_half):
+        blk_top = r-win_half
+        blk_bottom = r+win_half+1
+        for c in range(win_half, im_w+win_half):
+            blk_left = c-win_half
+            blk_right = c+win_half+1
+            blk = im_pad[blk_top:blk_bottom, blk_left:blk_right]
+            filtered[r-win_half, c-win_half] = np.mean(blk)
     return filtered
 
 def meanFilterSat(im, win_half):
@@ -49,9 +55,9 @@ def meanFilterSat(im, win_half):
 
     # 向外扩充, 前面左边多增加1行1列, 方便计算
     im_pad = np.zeros((im_h+2*win_half+1, im_w+2*win_half+1), im.dtype)
-    im_pad[win_half+1:im_h+win_half+1, win_half+1:im_w+win_half+1] = im
+    im_pad[1:, 1:] = padding(im, win_half)
     im_pad0 = np.zeros((im_h+2*win_half+1, im_w+2*win_half+1), im.dtype)
-    im_pad0[win_half+1:im_h+win_half+1, win_half+1:im_w+win_half+1] = np.ones((im_h, im_w))
+    im_pad0[1:, 1:] = padding(np.ones((im_h, im_w)), win_half)
 
     # 计算积分图, nums用于记录每个block像素个数
     sat = np.cumsum(im_pad, axis=0)
@@ -79,42 +85,34 @@ if __name__ == '__main__':
 
     from PIL import Image
     import matplotlib.pyplot as plt
-    import time
 
     img_path = '../src/lena.jpg'
     im = Image.open(img_path)
     im = np.array(im, dtype=float)
 
-    filter_size = [2,4,8,16,32,64]
-    time_base = np.zeros((len(filter_size,)))
-    time_sat = np.zeros((len(filter_size,)))
     mean_base = np.zeros(im.shape, im.dtype)
     mean_sat = np.zeros(im.shape, im.dtype)
-    for idx, fs in enumerate(filter_size):
-        time_start = time.perf_counter()
-        mean_base[:,:,0] = meanFilterBase(im[:,:,0], fs)
-        mean_base[:,:,1] = meanFilterBase(im[:,:,1], fs)
-        mean_base[:,:,2] = meanFilterBase(im[:,:,2], fs)
-        time_end = time.perf_counter()
-        time_base[idx] = time_end - time_start
-        
-        time_start = time.perf_counter()
-        mean_sat[:,:,0] = meanFilterSat(im[:,:,0], fs)
-        mean_sat[:,:,1] = meanFilterSat(im[:,:,1], fs)
-        mean_sat[:,:,2] = meanFilterSat(im[:,:,2], fs)
-        time_end = time.perf_counter()
-        time_sat[idx] = time_end - time_start
 
-    # im_filtered = Image.fromarray(meanSat.astype('uint8'))
-    # plt.imshow(im_filtered)
-    # plt.axis('off')
-    # plt.show()
+    win_half = 3
 
-    plt.plot(filter_size, time_base)
-    plt.plot(filter_size, time_sat)
-    plt.title('Time Consuming', fontsize=20)
-    plt.xlabel('filter window radius', fontsize=14)
-    plt.ylabel('time(s)', fontsize=14)
-    plt.legend(['base', 'integral'])
-    plt.savefig('../src/mean_filter_time_cmp.png')
+    mean_base[:,:,0] = meanFilterBase(im[:,:,0], win_half)
+    mean_base[:,:,1] = meanFilterBase(im[:,:,1], win_half)
+    mean_base[:,:,2] = meanFilterBase(im[:,:,2], win_half)
+
+    mean_sat[:,:,0] = meanFilterSat(im[:,:,0], win_half)
+    mean_sat[:,:,1] = meanFilterSat(im[:,:,1], win_half)
+    mean_sat[:,:,2] = meanFilterSat(im[:,:,2], win_half)
+
+    assert (mean_base == mean_sat).all()
+
+    plt.figure()
+    im_base = Image.fromarray(mean_base.astype('uint8'))
+    plt.imshow(im_base)
+    plt.axis('off')
+    plt.show()
+
+    plt.figure()
+    im_sat = Image.fromarray(mean_sat.astype('uint8'))
+    plt.imshow(im_sat)
+    plt.axis('off')
     plt.show()
