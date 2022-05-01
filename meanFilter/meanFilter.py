@@ -8,7 +8,6 @@
 # @Docs   : 均值滤波及其改进
 '''
 
-from matplotlib.pyplot import axis
 import numpy as np
 import sys
 if '../imPadding/' not in sys.path:
@@ -104,34 +103,48 @@ def meanFilterSWF(im, radius):
     sat = np.cumsum(im_pad, axis=0)
     sat = np.cumsum(sat, axis=1)
 
-    size_L = size_R = size_U = size_D = (radius*2+1) * (radius+1)
-    size_LU = size_LD = size_RD = size_RU = (radius+1) * (radius+1)
+    size_half = (radius*2+1) * (radius+1)
+    size_quarter = (radius+1) * (radius+1)
 
     # 滤波
+    # 提前计算好每个子block的值, 避免重复计算, 从而减少耗时
+    # 每个子block以左上角坐标作为索引
+    blk_LRs = np.zeros(sat.shape, sat.dtype)
+    for r in range(1, im_h+1):
+        blk_r = r+radius
+        for c in range(1, im_w+radius+1):
+            blk_c = c+radius
+            blk_LRs[r,c] = sat[blk_r+radius, blk_c] - sat[r-1, blk_c] - sat[blk_r+radius, c-1] + sat[r-1, c-1]
+            blk_LRs[r,c] /= size_half
+    blk_UDs = np.zeros(sat.shape, sat.dtype)
+    for r in range(1, im_h+radius+1):
+        blk_r = r+radius
+        for c in range(1, im_w+1):
+            blk_c = c+radius
+            blk_UDs[r,c] = sat[blk_r, blk_c+radius] - sat[r-1, blk_c+radius] - sat[blk_r, c-1] + sat[r-1, c-1]
+            blk_UDs[r,c] /= size_half
+    blk2 = np.zeros(sat.shape, sat.dtype)
+    for r in range(1, im_h+radius+1):
+        blk_r = r+radius
+        for c in range(1, im_w+radius+1):
+            blk_c = c+radius
+            blk2[r,c] = sat[blk_r, blk_c] - sat[r-1, blk_c] - sat[blk_r, c-1] + sat[r-1, c-1]
+            blk2[r,c] /= size_quarter
     filtered = np.zeros((im_h, im_w), im.dtype)
     for r in range(radius+1, im_h+radius+1):
-        bottom_r = r+radius
-        top_r = r-radius-1
+        blk_r = r - radius
         for c in range(radius+1, im_w+radius+1):
-            right_c = c+radius
-            left_c = c-radius-1
-            blk_L = sat[bottom_r, c] - sat[top_r, c] - sat[bottom_r, left_c] + sat[top_r, left_c]
-            blk_R = sat[bottom_r, right_c] - sat[top_r, right_c] - sat[bottom_r, c-1] + sat[top_r, c-1]
-            blk_U = sat[r, right_c] - sat[top_r, right_c] - sat[r, left_c] + sat[top_r, left_c]
-            blk_D = sat[bottom_r, right_c] - sat[r-1, right_c] - sat[bottom_r, left_c] + sat[r-1, left_c]
-            blk_LU = sat[r, c] - sat[top_r, c] - sat[r, left_c] + sat[top_r, left_c]
-            blk_LD = sat[bottom_r, c] - sat[r-1, c] - sat[bottom_r, left_c] + sat[r-1, left_c]
-            blk_RD = sat[bottom_r, right_c] - sat[r-1, right_c] - sat[bottom_r, c-1] + sat[r-1, c-1]
-            blk_RU = sat[r, right_c] - sat[top_r, right_c] - sat[r, c-1] + sat[top_r, c-1]
+            blk_c = c - radius
 
-            blk_L = blk_L / size_L
-            blk_R = blk_R / size_R
-            blk_U = blk_U / size_U
-            blk_D = blk_D / size_D
-            blk_LU = blk_LU / size_LU
-            blk_LD = blk_LD / size_LD
-            blk_RD = blk_RD / size_RD
-            blk_RU = blk_RU / size_RU
+            blk_L = blk_LRs[blk_r, blk_c]
+            blk_R = blk_LRs[blk_r, c]
+            blk_U = blk_UDs[blk_r, blk_c]
+            blk_D = blk_UDs[r, blk_c]
+            blk_LU = blk2[blk_r, blk_c]
+            blk_LD = blk2[r, blk_c]
+            blk_RD = blk2[r, c]
+            blk_RU = blk2[blk_r, c]
+
             E = [blk_L, blk_R, blk_U, blk_D, blk_LU, blk_LD, blk_RD, blk_RU]
             E1 = abs(np.array(E) - im_pad[r, c])
             idx = np.argmin(E1)
@@ -176,7 +189,8 @@ def meanFilterSNN(im, radius):
 def meanFilterKuwahara(im, radius):
     '''
     ### Docs: kuwahara均值滤波, 使用积分图加速
-        - "Smooth operator: Smoothing seismic interpretations and attributes", 2007
+        - "Processing of RI-Angiocardiographic Images", 1976
+        - "Free-size accelerated Kuwahara filter", 2021
         - 方差: 转换成一阶及二阶积分图, sum(xi^2)/n - u^2
     ### Args:
         - im: H*W, numpy.array, float, 单通道图像数据
@@ -201,35 +215,40 @@ def meanFilterKuwahara(im, radius):
     sat2 = np.cumsum(sat2, axis=1)
 
     # 滤波
+    # 提前计算好每个子block的值, 避免重复计算, 从而减少耗时
+    # 每个子block以左上角坐标作为索引
+    blk = np.zeros(sat.shape, sat.dtype)
+    blk2 = np.zeros(sat.shape, sat.dtype)
+    for r in range(1, im_h+radius+1):
+        blk_r = r+radius
+        for c in range(1, im_w+radius+1):
+            blk_c = c+radius
+            blk[r,c] = sat[blk_r, blk_c] - sat[r-1, blk_c] - sat[blk_r, c-1] + sat[r-1, c-1]
+            blk2[r,c] = sat2[blk_r, blk_c] - sat2[r-1, blk_c] - sat2[blk_r, c-1] + sat2[r-1, c-1]
+            blk2[r,c] -= blk[r,c] ** 2 / blk_size
     filtered = np.zeros((im_h, im_w), im.dtype)
     for r in range(radius+1, im_h+radius+1):
-        bottom_r = r+radius
-        top_r = r-radius-1
+        blk_r = r - radius
         for c in range(radius+1, im_w+radius+1):
-            right_c = c+radius
-            left_c = c-radius-1
-            blk_LU_std = sat2[r, c] - sat2[top_r, c] - sat2[r, left_c] + sat2[top_r, left_c]
-            blk_LU = sat[r, c] - sat[top_r, c] - sat[r, left_c] + sat[top_r, left_c]
-            blk_LU_std = blk_LU_std - blk_LU ** 2 / blk_size
+            blk_c = c - radius
+            blk_LU = blk[blk_r, blk_c]
+            blk_LU_std = blk2[blk_r, blk_c]
 
-            blk_LD_std = sat2[bottom_r, c] - sat2[r-1, c] - sat2[bottom_r, left_c] + sat2[r-1, left_c]
-            blk_LD = sat[bottom_r, c] - sat[r-1, c] - sat[bottom_r, left_c] + sat[r-1, left_c]
-            blk_LD_std = blk_LD_std - blk_LD ** 2 / blk_size
+            blk_LD = blk[r, blk_c]
+            blk_LD_std = blk2[r, blk_c]
 
-            blk_RD_std = sat2[bottom_r, right_c] - sat2[r-1, right_c] - sat2[bottom_r, c-1] + sat2[r-1, c-1]
-            blk_RD = sat[bottom_r, right_c] - sat[r-1, right_c] - sat[bottom_r, c-1] + sat[r-1, c-1]
-            blk_RD_std = blk_RD_std - blk_RD ** 2 / blk_size
+            blk_RD = blk[r, c]
+            blk_RD_std = blk2[r, c]
 
-            blk_RU_std = sat2[r, right_c] - sat2[top_r, right_c] - sat2[r, c-1] + sat2[top_r, c-1]
-            blk_RU = sat[r, right_c] - sat[top_r, right_c] - sat[r, c-1] + sat[top_r, c-1]
-            blk_RU_std = blk_RU_std - blk_RU ** 2 / blk_size
+            blk_RU = blk[blk_r, c]
+            blk_RU_std = blk2[blk_r, c]
 
             stds = [blk_LU_std, blk_LD_std, blk_RD_std, blk_RU_std]
             means = [blk_LU, blk_LD, blk_RD, blk_RU]
             idx = np.argmin(stds)
-            
             filtered[r-radius-1, c-radius-1] = means[idx]
     filtered = filtered / blk_size
+
     return filtered
 
 if __name__ == '__main__':
